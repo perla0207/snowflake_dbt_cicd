@@ -1,0 +1,40 @@
+name: Deploy dbt to DEV
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  deploy-dev:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dbt
+        run: pip install dbt-snowflake==1.11.2
+
+      - name: Create profiles.yml for CI (DEV)
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml << 'EOF'
+          dev_project:
+            target: dev
+            outputs:
+              dev:
+                type: snowflake
+                account: "${{ secrets.SF_ACCOUNT }}"
+                user: "${{ secrets.SF_DEV_USER }}"
+                password: "${{ secrets.SF_DEV_PASSWORD }}"
+                role: "${{ secrets.SF_DEV_ROLE }}"
+                warehouse: "${{ secrets.SF_DEV_WAREHOUSE }}"
+                database: "${{ secrets.SF_DEV_DATABASE }}"
+                schema: "APP"
+                threads: 4
+          EOF
+
+      - name: dbt build (DEV)
+        run: dbt build --target dev
