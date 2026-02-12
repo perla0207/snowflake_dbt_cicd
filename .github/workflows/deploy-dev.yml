@@ -7,6 +7,7 @@ on:
 jobs:
   deploy-dev:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -17,24 +18,63 @@ jobs:
       - name: Install dbt
         run: pip install dbt-snowflake==1.11.2
 
-      - name: Create profiles.yml for CI (DEV)
+      # 1) Prove secrets are present (prints only true/false)
+      - name: Check secrets present (safe)
         run: |
+          echo "SF_ACCOUNT set? ${{ secrets.SF_ACCOUNT != '' }}"
+          echo "SF_DEV_USER set? ${{ secrets.SF_DEV_USER != '' }}"
+          echo "SF_DEV_PASSWORD set? ${{ secrets.SF_DEV_PASSWORD != '' }}"
+          echo "SF_DEV_ROLE set? ${{ secrets.SF_DEV_ROLE != '' }}"
+          echo "SF_DEV_WAREHOUSE set? ${{ secrets.SF_DEV_WAREHOUSE != '' }}"
+          echo "SF_DEV_DATABASE set? ${{ secrets.SF_DEV_DATABASE != '' }}"
+
+      # 2) Create profiles.yml using env vars (more reliable) + fail fast if missing
+      - name: Create profiles.yml for CI (DEV) - fail fast
+        shell: bash
+        env:
+          SF_ACCOUNT: ${{ secrets.SF_ACCOUNT }}
+          SF_DEV_USER: ${{ secrets.SF_DEV_USER }}
+          SF_DEV_PASSWORD: ${{ secrets.SF_DEV_PASSWORD }}
+          SF_DEV_ROLE: ${{ secrets.SF_DEV_ROLE }}
+          SF_DEV_WAREHOUSE: ${{ secrets.SF_DEV_WAREHOUSE }}
+          SF_DEV_DATABASE: ${{ secrets.SF_DEV_DATABASE }}
+        run: |
+          set -euo pipefail
+
+          : "${SF_ACCOUNT:?Missing SF_ACCOUNT}"
+          : "${SF_DEV_USER:?Missing SF_DEV_USER}"
+          : "${SF_DEV_PASSWORD:?Missing SF_DEV_PASSWORD}"
+          : "${SF_DEV_ROLE:?Missing SF_DEV_ROLE}"
+          : "${SF_DEV_WAREHOUSE:?Missing SF_DEV_WAREHOUSE}"
+          : "${SF_DEV_DATABASE:?Missing SF_DEV_DATABASE}"
+
           mkdir -p ~/.dbt
-          cat > ~/.dbt/profiles.yml << 'EOF'
+          cat > ~/.dbt/profiles.yml << EOF
           dev_project:
             target: dev
             outputs:
               dev:
                 type: snowflake
-                account: "${{ secrets.SF_ACCOUNT }}"
-                user: "${{ secrets.SF_DEV_USER }}"
-                password: "${{ secrets.SF_DEV_PASSWORD }}"
-                role: "${{ secrets.SF_DEV_ROLE }}"
-                warehouse: "${{ secrets.SF_DEV_WAREHOUSE }}"
-                database: "${{ secrets.SF_DEV_DATABASE }}"
+                account: "${SF_ACCOUNT}"
+                user: "${SF_DEV_USER}"
+                password: "${SF_DEV_PASSWORD}"
+                role: "${SF_DEV_ROLE}"
+                warehouse: "${SF_DEV_WAREHOUSE}"
+                database: "${SF_DEV_DATABASE}"
                 schema: "APP"
                 threads: 4
+                client_session_keep_alive: false
           EOF
 
+      # 3) Print the generated profiles.yml (password redacted)
+      - name: Show generated profiles.yml (password redacted)
+        run: |
+          sed -e 's/password: .*/password: "***REDACTED***"/' ~/.dbt/profiles.yml
+
+      # 4) Validate dbt can read profile + connect
+      - name: dbt debug (DEV)
+        run: dbt debug --target dev
+
+      # 5) Build models + run tests
       - name: dbt build (DEV)
         run: dbt build --target dev
